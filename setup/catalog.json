@@ -1017,18 +1017,6 @@
    "vendor": "nvidia"
   },
   {
-   "id": "archive:therock-runtime",
-   "kind": "archive",
-   "component": "song",
-   "vendor": "amd",
-   "dest": "runtime/rocm",
-   "size": 524288000,
-   "url": "https://github.com/ROCm/TheRock/releases/download/v7.13.0rc1/therock-runtime-windows.zip",
-   "sha256": "PLACEHOLDER",
-   "strip": "therock-runtime",
-   "detail": "AMD TheRock v4 HIP libraries (librocdxg, amdhip64, etc.)"
-  },
-  {
    "id": "wheels:rocm-yue2",
    "kind": "wheels",
    "component": "song",
@@ -1468,6 +1456,17 @@
     }
    ],
    "size": 365161835
+  },
+  {
+   "id": "archive:therock-runtime",
+   "kind": "archive",
+   "component": "song",
+   "vendor": "amd",
+   "dest": "runtime/rocm/.installed",
+   "size": 1,
+   "url": "https://huggingface.co/m-a-p/YuE2-3B/resolve/29b3558dd46954a0cd9021dc76d5c91864a0f1c7/.gitattributes",
+   "sha256": "",
+   "detail": "AMD ROCm runtime (librocdxg, hipblas, rocblas) - manual install: see docs/BUILD_AMD.md"
   }
  ]
 }
