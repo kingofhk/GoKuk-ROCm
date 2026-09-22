@@ -1,10 +1,13 @@
-"""What graphics card this machine has, asked of nvidia-smi.
+"""What graphics card this machine has, asked of the driver CLI.
 
 Neither Gokuk nor Gokuk Setup imports torch, so the card is identified the way
-the driver itself reports it. nvidia-smi ships with every NVIDIA driver.
+the driver itself reports it. nvidia-smi ships with every NVIDIA driver;
+rocminfo ships with every ROCm install.
 """
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -20,6 +23,10 @@ class GPU:
     name: str
     vram_mib: int
     driver: str
+    #: True when this GPU was reported by ``rocminfo`` rather than ``nvidia-smi``.
+    #: AMD cards carry a placeholder driver string and skip the NVIDIA driver
+    #: version check.
+    is_amd: bool = False
 
     @property
     def vram_gib(self) -> float:
@@ -34,7 +41,7 @@ class GPU:
             return 0.0
 
 
-def detect() -> GPU | None:
+def _detect_nvidia() -> GPU | None:
     """The largest NVIDIA card, or None if there is none (or no driver)."""
     exe = shutil.which("nvidia-smi")
     if not exe:
@@ -53,6 +60,52 @@ def detect() -> GPU | None:
         if len(parts) == 3 and parts[1].isdigit():
             cards.append(GPU(parts[0], int(parts[1]), parts[2]))
     return max(cards, key=lambda g: g.vram_mib) if cards else None
+
+
+def _detect_amd() -> GPU | None:
+    """The largest AMD card readable by ``rocminfo``, or None on failure.
+
+    Two paths: prefer ``rocminfo --json`` (ROCm 5.4+) which lists VRAM cleanly,
+    fall back to parsing the plain-text table. Returns a ``GPU`` with a
+    placeholder driver string (ROCm is reported by the runtime, not the card).
+    """
+    exe = shutil.which("rocminfo")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe], capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    # The plain text path - rocminfo always emits this on Windows.
+    name = None
+    vram_mib = 0
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Marketing Name:"):
+            name = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Name:"):
+            # Prefer Marketing Name when both are present; only fill if empty.
+            if not name:
+                candidate = stripped.split(":", 1)[1].strip()
+                if candidate and candidate.lower() != "gfx":
+                    name = candidate
+        elif "Total Memory" in stripped and "MB" in stripped:
+            match = re.search(r"([\d.]+)\s*MB", stripped)
+            if match:
+                vram_mib = max(vram_mib, int(float(match.group(1))))
+
+    if not name or vram_mib <= 0:
+        return None
+    return GPU(name=name, vram_mib=vram_mib, driver="0.0", is_amd=True)
+
+
+def detect() -> GPU | None:
+    """The largest GPU, regardless of vendor. NVIDIA first, AMD second."""
+    return _detect_nvidia() or _detect_amd()
 
 
 #: How hard to lean on the card. The engine always gets the whole card; a mode
@@ -74,9 +127,11 @@ def auto_memory(gpu: GPU | None) -> str:
 def verdict(gpu: GPU | None) -> tuple[str, str]:
     """(level, sentence) where level is ok | warn | bad."""
     if gpu is None:
-        return "bad", t("No NVIDIA graphics card found - Gokuk needs one to make music.")
-    if gpu.driver_number and gpu.driver_number < MIN_DRIVER:
-        return "bad", t("{name}: the graphics driver ({driver}) is too old. Update it from nvidia.com "
+        return "bad", t("No CUDA or ROCm graphics card found - Gokuk needs a GPU to make music.")
+    # AMD detection does not surface a driver version; the NVIDIA minimum
+    # driver check only applies when one was returned.
+    if not gpu.is_amd and gpu.driver_number and gpu.driver_number < MIN_DRIVER:
+        return "bad", t("{name}: the NVIDIA graphics driver ({driver}) is too old. Update it from nvidia.com "
                         "to version {need} or newer.", name=gpu.name, driver=gpu.driver,
                         need=int(MIN_DRIVER))
     gib = round(gpu.vram_gib)

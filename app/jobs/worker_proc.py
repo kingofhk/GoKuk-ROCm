@@ -72,6 +72,16 @@ def portable_environment(extra_path: list[Path] | None = None) -> QProcessEnviro
         env.insert(key, value)
     if extra_path:
         env.insert("PATH", os.pathsep.join([*map(str, extra_path), env.value("PATH")]))
+    # ROCm runtime hints. The first three are no-ops on NVIDIA wheels - they
+    # are read by the HIP build of PyTorch to skip Triton-AMD attention paths
+    # that the AMD wheels lack. ``YUE2_HIP_BUILD`` is read by the workers
+    # themselves to decide between attention backends.
+    for key, value in {
+        "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "1",
+        "FLASH_ATTENTION_TRITON_AMD_ENABLE": "FALSE",
+        "TORCH_BLAS_PREFER_HIPBLASLT": "1",
+    }.items():
+        env.insert(key, value)
     return env
 
 

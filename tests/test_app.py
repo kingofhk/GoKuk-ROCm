@@ -42,6 +42,15 @@ def test_gpu_profiles_and_verdict():
     assert gpu.verdict(None)[0] == "bad"
     assert gpu.verdict(gpu.GPU("old", 24564, "531.10"))[0] == "bad"
     assert gpu.verdict(gpu.GPU("A4000", 16376, "581.57"))[0] == "warn"
+    # AMD GPUs are detected via rocminfo and reported with a placeholder
+    # driver string. Verdict should treat them like NVIDIA cards of the same
+    # VRAM tier - ROCm does not gate on driver_version.
+    amd_16 = gpu.GPU("RX 9070 XT", 16376, "0.0", is_amd=True)
+    amd_24 = gpu.GPU("RX 7900 XTX", 24564, "0.0", is_amd=True)
+    assert gpu.auto_memory(amd_16) == "low"
+    assert gpu.auto_memory(amd_24) == "fast"
+    assert gpu.verdict(amd_16)[0] == "warn"
+    assert gpu.verdict(amd_24)[0] == "ok"
 
 
 def test_library_round_trip_and_trash(tmp_path):

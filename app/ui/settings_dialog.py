@@ -22,6 +22,10 @@ PERFORMANCE = [
 ]
 MODE_NAMES = {"fast": N("Fastest"), "balanced": N("Balanced"), "low": N("Lowest memory")}
 BACKENDS = [("torch", N("Fast (CUDA graphs)")), ("torch-eager", N("Safe (slower, most compatible)"))]
+#: On an AMD HIP build we relabel the fast backend so users do not chase the
+#: NVIDIA wording when their card uses a different runtime.
+HIP_BACKENDS = [("torch-eager", N("Safe (slower, most compatible)"))]
+HIP_BACKEND_NOTE = N("AMD ROCm builds run only in safe mode right now.")
 DECODERS = [("standard", N("Standard - best for listening")), ("legacy", N("Benchmark (paper evaluation)"))]
 
 
@@ -62,8 +66,21 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.performance)
         layout.addWidget(note)
         layout.addWidget(QLabel(t("Speed mode")))
-        self.backend = self._combo(BACKENDS, cfg.get("backend"))
+        # The fast backend uses CUDA graphs which are not portable to HIP yet,
+        # so the AMD build collapses the dropdown to the safe option only.
+        if gpu is not None and getattr(gpu, "is_amd", False):
+            backend_choices = HIP_BACKENDS
+            default_backend = "torch-eager"
+        else:
+            backend_choices = BACKENDS
+            default_backend = cfg.get("backend")
+        self.backend = self._combo(backend_choices, default_backend)
         layout.addWidget(self.backend)
+        if gpu is not None and getattr(gpu, "is_amd", False):
+            note_rocm = QLabel(t(HIP_BACKEND_NOTE))
+            note_rocm.setObjectName("Hint")
+            note_rocm.setWordWrap(True)
+            layout.addWidget(note_rocm)
         layout.addWidget(QLabel(t("Audio decoder")))
         self.decoder = self._combo(DECODERS, cfg.get("decoder"))
         if not (paths.models_dir() / "YuE2-Vae-legacy" / "model.safetensors").is_file():

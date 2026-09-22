@@ -85,6 +85,13 @@ def patch_progress() -> None:
     progress.Progress = EventProgress
 
 
+def is_rocm_build() -> bool:
+    """True when this runtime's torch is the AMD HIP build rather than NVIDIA CUDA."""
+    import torch
+
+    return bool(getattr(torch.version, "hip", None))
+
+
 def flash_attention_works() -> bool:
     """Whether torch's built-in variable-length FlashAttention actually runs.
 
@@ -92,9 +99,17 @@ def flash_attention_works() -> bool:
     *exists*. PyTorch's Windows wheels declare it but are built without it
     ("USE_FLASH_ATTENTION was not enabled for build"), so the first song fails.
     One tiny call answers the real question.
+
+    On AMD HIP builds the operator exists in ATen's schema but the HIP path
+    rejects ``seqused_k`` for varlen forward (ROCm port note from the
+    YuE2-T8-ROCm project, validated on RX 9070 XT). Always return False so the
+    caller steers to a different backend rather than producing an audio track
+    full of NaNs.
     """
     import torch
 
+    if is_rocm_build():
+        return False
     try:
         q = torch.zeros(1, 1, 8, dtype=torch.bfloat16, device="cuda")
         cu = torch.tensor([0, 1], dtype=torch.int32, device="cuda")
@@ -105,31 +120,61 @@ def flash_attention_works() -> bool:
 
 
 def patch_attention() -> str:
-    """Steer GraphAR to cuDNN attention where FlashAttention is not built in."""
-    if flash_attention_works():
+    """Steer GraphAR to a working attention backend.
+
+    NVIDIA: prefer flash, fall back to cuDNN when PyTorch's Windows wheels
+    declare the op without building it.
+    AMD (HIP build): flash is unsafe (HIP path rejects varlen ``seqused_k``)
+    and ``attention_backend="cudnn"`` strings are NVIDIA-only, so force the
+    pipeline to its masked-SDPA path. The exact key YuE2 accepts is
+    implementation-defined, so we also coerce ``"auto"`` / ``"flash"`` /
+    ``"cudnn"`` / ``"sdpa"`` to the same masked-SDPA request.
+    """
+    if not is_rocm_build() and flash_attention_works():
         return "flash"
     from yue2 import cuda_graph
 
     original = cuda_graph.GraphAR.__init__
 
     def init(self, *args, attention_backend="auto", **kwargs):
-        if attention_backend in ("auto", "flash"):
+        if is_rocm_build():
+            attention_backend = "sdpa"
+        elif attention_backend in ("auto", "flash"):
             attention_backend = "cudnn"
         original(self, *args, attention_backend=attention_backend, **kwargs)
 
     cuda_graph.GraphAR.__init__ = init
-    return "cudnn"
+    return "sdpa" if is_rocm_build() else "cudnn"
 
 
 #: What each memory mode changes. They trade speed for memory, not quality: offload_ar parks the language model in system RAM while the
 #: acoustic stage runs, a smaller vae_core_frames decodes audio in shorter tiles,
 #: and query_chunk_size splits the acoustic attention (the stage that ran out of
 #: memory on a 3-minute song) into blocks.
+#:
+#: On AMD HIP builds we lower ``vae_core_frames`` for sub-20 GiB cards: MIOpen
+#: picks solver families per tensor shape, and on a 16 GB RX 9070 XT the
+#: ``1024``-tile solver is roughly 2x slower than ``512`` for the same RMS.
+#: (validated on YuE2-T8-ROCm's RX 9070 XT run, see docs/ROCM_PORT.md).
 MEMORY_MODES = {
     "fast": {"offload_ar": False, "vae_core_frames": 1024, "query_chunk_size": None},
     "balanced": {"offload_ar": True, "vae_core_frames": 1024, "query_chunk_size": None},
     "low": {"offload_ar": True, "vae_core_frames": 512, "query_chunk_size": 2048},
 }
+
+
+def _adapt_vaae_tiles(mode: str, vae_core_frames: int, vram_gib: float) -> int:
+    """Pick a VAE tile size for the actual card.
+
+    The MIOpen solver cache on AMD picks per-shape kernels; a 16 GB card
+    hitting ``vae_core_frames=1024`` runs the slower decoder solver. Cap at
+    512 on sub-20 GiB HIP builds. NVIDIA cards keep the requested value.
+    """
+    if vram_gib >= 20 or mode != "fast":
+        return vae_core_frames
+    if not is_rocm_build():
+        return vae_core_frames
+    return min(vae_core_frames, 512)
 
 
 def patch_nar_chunking(size: int) -> None:
@@ -159,7 +204,10 @@ def run(job: dict) -> int:
     output.mkdir(parents=True, exist_ok=True)
 
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is not available - Gokuk needs an NVIDIA graphics card")
+        raise RuntimeError(
+            "No GPU found - Gokuk needs a CUDA or ROCm graphics card. "
+            "On AMD run with the ROCm runtime (see docs/ROCM_PORT.md)."
+        )
     props = torch.cuda.get_device_properties(0)
     proto.emit("hello", worker="yue2", torch=torch.__version__, gpu=props.name,
                vram_gib=round(props.total_memory / 2**30, 1))
@@ -176,6 +224,8 @@ def run(job: dict) -> int:
     # So the budget is always the whole card, and a mode picks the real savers.
     memory = MEMORY_MODES.get(job.get("memory", "balanced"), MEMORY_MODES["balanced"])
     budget = props.total_memory / 2**30
+    memory["vae_core_frames"] = _adapt_vaae_tiles(
+        job.get("memory", "balanced"), memory["vae_core_frames"], budget)
     if memory["query_chunk_size"]:
         patch_nar_chunking(memory["query_chunk_size"])
     print(f"memory mode: {job.get('memory')} {memory}, card {budget:.1f} GiB", file=sys.stderr)
