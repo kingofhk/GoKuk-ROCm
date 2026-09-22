@@ -115,6 +115,65 @@ What this smoke test does NOT confirm:
 These three are the items the human at the desktop should report
 on, per `docs/VALIDATION.md` Section D (Generate a song).
 
+## 5b. AMD HIP SDK dependency (the real blocker)
+
+The end-to-end install runs cleanly through Setup until the verify
+self-test:
+
+```
+$ runtime\yue2\python.exe -c "import torch, yue2, soundfile; ..."
+Traceback (most recent call last):
+  File "...\torch\__init__.py", line 155, in <module>
+    _rocm_init.initialize()
+  File "...\torch\_rocm_init.py", line 3, in initialize
+    import rocm_sdk
+ModuleNotFoundError: No module named 'rocm_sdk'
+```
+
+`_rocm_init.initialize()` calls `import rocm_sdk` and preloads
+thirteen HIP/rocBLAS DLLs (`amd_comgr`, `amdhip64`, `hiprtc`,
+`hipblas`, `hipfft`, `hiprand`, `hipsparse`, `hipsparselt`,
+`hipsolver`, `hipblaslt`, `miopen`, `hipdnn`, `rocm-openblas`).
+Adrenalin 26.x ships only two of these in `C:\Windows\System32`
+(`amdhip64_7.dll` and `amd_comgr_3.dll`); the other eleven plus
+the `rocm_sdk` Python module come from the **AMD HIP SDK** install.
+
+AMD's HIP SDK is a Windows-only downloadable from
+https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html. The
+ROCm nightly index (`rocm.nightlies.amd.com`) ships `rocm_sdk_core`
+Python wheels only for Linux; the Windows port of those wheels does
+not yet exist publicly.
+
+**This is not a fork bug.** AMD has not published a Windows wheel
+distribution for `rocm_sdk`. Until they do, every ROCm PyTorch
+project on Windows depends on the HIP SDK installer. The fork
+arranges for PyTorch to install and reach the `import rocm_sdk`
+line; what it cannot do is manufacture that module.
+
+**Workaround for end-to-end testing on this specific RX 9070 XT**:
+
+1. Download the AMD HIP SDK Windows installer from
+   https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html
+   (current release: 7.1.1, ~1 GB).
+2. Run the installer. It drops the missing DLLs into
+   `C:\Program Files\AMD\ROCm\7.1\bin\` and the `rocm_sdk` Python
+   package into its bundled site-packages.
+3. Either copy the SDK's `bin\*.dll` files into
+   `runtime\rocm\bin\` (the directory `docs/BUILD_AMD.md` already
+   reserves), or set `ROCM_HOME=C:\Program Files\AMD\ROCm\7.1`
+   before launching `GokukSetup.py`.
+4. Re-run `runtime\yue2\python.exe -c "import torch; print(torch.cuda.is_available())"`.
+
+If `True`, the fork reaches song generation. The first song
+audio.flac will then reveal whether the source-code patches in
+Phase 1 (forced-SDPA attention, adaptive VAE tile size) correctly
+adapt to the real HIP wheel's `torch.version.hip` value.
+
+If SDK installation is undesirable, the only escape is to run the
+fork on Linux (where AMD ships the `rocm_sdk` Python wheel) or to
+wait for AMD to publish Windows wheels. Neither is in this fork's
+scope to deliver.
+
 ## 6. Files added in this commit
 
 * `docs/VALIDATION_RX_9070_XT.md` - this file
