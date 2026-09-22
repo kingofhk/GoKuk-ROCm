@@ -93,8 +93,16 @@ class Catalog:
 
         ``vendor`` defaults to ``"nvidia"`` so the existing call sites keep
         their behaviour. Pass ``"amd"`` to switch to the ROCm-only wheel set;
-        models are vendor-neutral and are included by either choice.
+        models are vendor-neutral and are included by either choice. Tool and
+        Python-embedder archives are also vendor-neutral - they install the
+        same uv / Python / ffmpeg / TheRock-runtime bundles regardless of
+        GPU, only the wheels differ between vendors.
         """
+        # Archives that are vendor-neutral: the Python embeds (yue2 /
+        # sheetsage), uv, ffmpeg. The therock-runtime placeholder is
+        # tagged ``amd`` because it is only meaningful on that vendor;
+        # skipping it on NVIDIA installs is fine.
+        natural_archives = {"tool:uv", "tool:ffmpeg", "python:yue2", "python:sheetsage"}
         wanted = set(components) | {c.id for c in self.components if c.required}
         result = []
         for item in self.items:
@@ -103,6 +111,10 @@ class Catalog:
             # Models are vendor-neutral: they hold safetensors + config that
             # both NVIDIA and AMD runtimes can load.
             if item.kind == "model":
+                result.append(item)
+                continue
+            # Vendor-neutral archives install on either vendor.
+            if item.kind == "archive" and item.id in natural_archives:
                 result.append(item)
                 continue
             if item.vendor == vendor:
