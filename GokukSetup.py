@@ -91,7 +91,14 @@ def main() -> int:
               path=CATALOG_PATH))
         return 1
 
-    window = SetupWindow(Catalog())
+    # ``GOKUK_SETUP_VENDOR`` lets power users pick the wheel set manually
+    # (``nvidia`` or ``amd``). ``auto`` follows the detected GPU.
+    import os
+    vendor = os.environ.get("GOKUK_SETUP_VENDOR", "auto").strip().lower()
+    if vendor not in ("auto", "nvidia", "amd"):
+        vendor = "auto"
+
+    window = SetupWindow(Catalog(), vendor=vendor)
     window.show()
     _smoke_shot(app, window)
     return app.exec()

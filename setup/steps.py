@@ -79,11 +79,13 @@ class Installer:
                  on_progress: Callable[[Overall], None] | None = None,
                  on_log: Callable[[str], None] | None = None,
                  should_stop: Callable[[], bool] | None = None,
-                 hf_token: str = "", clean_wheels: bool = True):
+                 hf_token: str = "", clean_wheels: bool = True,
+                 vendor: str = "nvidia"):
         self.catalog = catalog
         self.root = Path(root)
         self.components = components
-        self.items = catalog.items_for(components)
+        self.vendor = vendor
+        self.items = catalog.items_for(components, vendor)
         self.on_step = on_step or (lambda s: None)
         self.on_progress = on_progress or (lambda p: None)
         self.on_log = on_log or (lambda s: None)
@@ -257,17 +259,33 @@ class Installer:
 
     def verify(self) -> None:
         checks = []
-        if any(i.id == "env:yue2" for i in self.items):
+        if any(i.id.startswith(("env:yue2", "wheels:rocm-yue2")) for i in self.items):
             checks.append((self.path("runtime/yue2/python.exe"),
-                           "import torch, yue2, soundfile; print('yue2', torch.__version__, torch.cuda.is_available())"))
-        if any(i.id == "env:sheetsage" for i in self.items):
+                           "import torch, yue2, soundfile; "
+                           "print('yue2', torch.__version__, "
+                           "torch.version.cuda is None, torch.cuda.is_available())"))
+        if any(i.id.startswith(("env:sheetsage", "wheels:rocm-sheetsage")) for i in self.items):
             checks.append((self.path("runtime/sheetsage/python.exe"),
                            "import torch, transformers, pretty_midi, soundfile; "
-                           "print('sheetsage', torch.__version__, torch.cuda.is_available())"))
+                           "print('sheetsage', torch.__version__, "
+                           "torch.version.cuda is None, torch.cuda.is_available())"))
         for python, code in checks:
             out = self._run([str(python), "-c", code], t("A runtime failed its self-test"))
-            if "False" in out:
-                self._log("Warning: the runtime cannot see the graphics card (CUDA unavailable)")
+            # The trailing two values are (torch.version.cuda is None, cuda.is_available()).
+            # On a ROCm install, the first must be True and the second True.
+            # On a CUDA install, the first must be False and the second True.
+            # Either way the card must be visible.
+            tokens = out.strip().split()
+            if len(tokens) >= 3:
+                cuda_is_none = tokens[-2] == "True"
+                gpu_visible = tokens[-1] == "True"
+                if not gpu_visible:
+                    self._log("Warning: the runtime cannot see the graphics card (GPU unavailable)")
+                if self.vendor == "amd" and not cuda_is_none:
+                    raise InstallError(t(
+                        "AMD ROCm install failed: this Python is built against CUDA, "
+                        "not HIP. Check that the AMD wheels were downloaded and not "
+                        "silently replaced by a CUDA build."))
 
     def write_state(self) -> None:
         state_file = self.path("setup_state.json")
@@ -282,6 +300,7 @@ class Installer:
         components = sorted({i.component for i in self.catalog.items if i.id in items and
                              all(j.id in items for j in self.catalog.items if j.component == i.component)})
         state.update({"schema": 1, "components": components, "items": items,
+                      "vendor": self.vendor,
                       "updated": datetime.now().isoformat(timespec="seconds")})
         state_file.write_text(json.dumps(state, indent=1), encoding="utf-8")
 

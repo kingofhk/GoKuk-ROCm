@@ -47,6 +47,12 @@ class Item:
         return self.data.get("dest", "")
 
     @property
+    def vendor(self) -> str:
+        """``amd`` for ROCm-only items, ``nvidia`` for the rest. Defaults to
+        ``nvidia`` so the existing catalog is unaffected."""
+        return self.data.get("vendor", "nvidia")
+
+    @property
     def files(self) -> list[dict]:
         """(url, relative target, size, sha256) for everything this item downloads."""
         if self.kind == "model":
@@ -82,15 +88,33 @@ class Catalog:
     def component(self, cid: str) -> Component:
         return next(c for c in self.components if c.id == cid)
 
-    def items_for(self, components) -> list[Item]:
+    def items_for(self, components, vendor: str = "nvidia") -> list[Item]:
+        """Items belonging to the requested components AND matching the vendor.
+
+        ``vendor`` defaults to ``"nvidia"`` so the existing call sites keep
+        their behaviour. Pass ``"amd"`` to switch to the ROCm-only wheel set;
+        models are vendor-neutral and are included by either choice.
+        """
         wanted = set(components) | {c.id for c in self.components if c.required}
-        return [i for i in self.items if i.component in wanted]
+        result = []
+        for item in self.items:
+            if item.component not in wanted:
+                continue
+            # Models are vendor-neutral: they hold safetensors + config that
+            # both NVIDIA and AMD runtimes can load.
+            if item.kind == "model":
+                result.append(item)
+                continue
+            if item.vendor == vendor:
+                result.append(item)
+        return result
 
-    def download_bytes(self, components) -> int:
-        return sum(i.size for i in self.items_for(components))
+    def download_bytes(self, components, vendor: str = "nvidia") -> int:
+        return sum(i.size for i in self.items_for(components, vendor))
 
-    def component_bytes(self, cid: str) -> int:
-        return sum(i.size for i in self.items if i.component == cid)
+    def component_bytes(self, cid: str, vendor: str = "nvidia") -> int:
+        items = self.items_for([cid], vendor)
+        return sum(i.size for i in items)
 
 
 def human_bytes(n: float) -> str:

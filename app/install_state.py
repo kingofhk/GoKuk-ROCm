@@ -27,6 +27,9 @@ class InstallState:
     components: list[str] = field(default_factory=list)
     missing: dict[str, list[str]] = field(default_factory=dict)
     updated: str = ""
+    #: ``amd`` when the runtime is ROCm, ``nvidia`` otherwise. ``None`` until
+    #: the user has run Setup at least once on this folder.
+    vendor: str | None = None
 
     @classmethod
     def load(cls) -> "InstallState":
@@ -43,7 +46,9 @@ class InstallState:
                 missing[component] = gone
             else:
                 present.append(component)
-        return cls(present, missing, raw.get("updated", "") if isinstance(raw, dict) else "")
+        vendor = raw.get("vendor") if isinstance(raw, dict) else None
+        return cls(present, missing, raw.get("updated", "") if isinstance(raw, dict) else "",
+                   vendor=vendor if vendor in ("amd", "nvidia") else None)
 
     @property
     def ready(self) -> bool:
@@ -52,3 +57,8 @@ class InstallState:
 
     def has(self, component: str) -> bool:
         return component in self.components
+
+    @property
+    def is_amd(self) -> bool:
+        """Convenience: True if the last Setup run installed ROCm wheels."""
+        return self.vendor == "amd"

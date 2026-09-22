@@ -8,6 +8,7 @@
  "ABC score": "ABC 樂譜",
  "ABC text": "ABC 文字",
  "AMD ROCm builds run only in safe mode right now.": "AMD ROCm 構建目前只能以安全模式運行。",
+ "AMD ROCm install failed: this Python is built against CUDA, not HIP. Check that the AMD wheels were downloaded and not silently replaced by a CUDA build.": "AMD ROCm 安裝失敗：此 Python 是建構於 CUDA 而非 HIP。請確認 AMD wheels 已下載, 並未在不知情下被 CUDA 版本替換。",
  "Acoustic guitar": "木結他",
  "Add 4 bars at the end": "在結尾加入 4 小節",
  "Add section tags like [Verse] and [Chorus] - they tell the singer how the song is built.": "加入 [Verse]、[Chorus] 等段落標籤 - 讓歌手知道歌曲的結構。",

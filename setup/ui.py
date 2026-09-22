@@ -49,20 +49,20 @@ class InstallWorker(QThread):
     finished_report = Signal(object)
 
     def __init__(self, catalog: Catalog, root: Path, components: list[str], token: str,
-                 clean: bool, parent=None):
+                 clean: bool, vendor: str = "nvidia", parent=None):
         super().__init__(parent)
-        self._args = (catalog, root, components, token, clean)
+        self._args = (catalog, root, components, token, clean, vendor)
         self._cancelled = False
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def run(self) -> None:
-        catalog, root, components, token, clean = self._args
+        catalog, root, components, token, clean, vendor = self._args
         installer = Installer(catalog, root, components, on_step=self.step.emit,
                               on_progress=self.progress.emit, on_log=self.log.emit,
                               should_stop=lambda: self._cancelled, hf_token=token,
-                              clean_wheels=clean)
+                              clean_wheels=clean, vendor=vendor)
         self.finished_report.emit(installer.run())
 
 
@@ -71,7 +71,8 @@ class ComponentCard(QFrame):
 
     changed = Signal()
 
-    def __init__(self, component: Component, catalog: Catalog, installed: bool, parent=None):
+    def __init__(self, component: Component, catalog: Catalog, installed: bool,
+                 vendor: str = "nvidia", parent=None):
         super().__init__(parent)
         self.component = component
         self.setObjectName("Panel")
@@ -96,7 +97,7 @@ class ComponentCard(QFrame):
             state = QLabel(t("Installed ✓"))
             state.setObjectName("Good")
             layout.addWidget(state)
-        size = QLabel(human_bytes(catalog.component_bytes(component.id)))
+        size = QLabel(human_bytes(catalog.component_bytes(component.id, vendor)))
         size.setObjectName("MonoAccent")
         layout.addWidget(size)
 
@@ -146,13 +147,19 @@ class StepList(QWidget):
 
 
 class SetupWindow(QMainWindow):
-    def __init__(self, catalog: Catalog, root: Path | None = None):
+    def __init__(self, catalog: Catalog, root: Path | None = None,
+                 vendor: str = "nvidia"):
         super().__init__()
         self.catalog = catalog
         self.root = Path(root or paths.root())
+        # Pick the wheel set automatically from the detected GPU. ``nvidia``
+        # is the default for backward compatibility; AMD cards prefer HIP.
+        self.gpu = gpu_info.detect()
+        if vendor == "auto":
+            vendor = "amd" if (self.gpu is not None and getattr(self.gpu, "is_amd", False)) else "nvidia"
+        self.vendor = vendor
         self.worker: InstallWorker | None = None
         self._current_step = 0
-        self.gpu = gpu_info.detect()
         self.setWindowTitle(t("Gokuk Setup"))
         self.resize(820, 860)
         self.setMinimumSize(700, 640)
@@ -228,7 +235,8 @@ class SetupWindow(QMainWindow):
         layout.addWidget(heading(t("What to include")))
         self.cards: list[ComponentCard] = []
         for component in self.catalog.components:
-            card = ComponentCard(component, self.catalog, component.id in state.components)
+            card = ComponentCard(component, self.catalog, component.id in state.components,
+                                 vendor=self.vendor)
             card.changed.connect(self._recalculate)
             self.cards.append(card)
             layout.addWidget(card)
@@ -371,7 +379,7 @@ class SetupWindow(QMainWindow):
         return [c.component.id for c in self.cards if c.checked]
 
     def _todo_bytes(self) -> int:
-        installer = Installer(self.catalog, self.root, self._selected())
+        installer = Installer(self.catalog, self.root, self._selected(), vendor=self.vendor)
         return sum(i.size for i in installer.plan())
 
     def _recalculate(self) -> None:
@@ -442,7 +450,7 @@ class SetupWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
 
         self.worker = InstallWorker(self.catalog, self.root, components, self.token.text().strip(),
-                                    self.clean.isChecked())
+                                    self.clean.isChecked(), vendor=self.vendor)
         self.worker.step.connect(self._on_step)
         self.worker.progress.connect(self._on_progress)
         self.worker.log.connect(self.log.append)

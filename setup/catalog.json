@@ -1,5 +1,5 @@
 {
- "schema": 1,
+ "schema": 2,
  "components": [
   {
    "id": "song",
@@ -543,7 +543,8 @@
    "size": 17612025,
    "sha256": "a86c9dc7bad9b03f388583b7187c05fe9951c2e0d392217e8fd43d97787f6ec2",
    "dest": "runtime/uv",
-   "strip": null
+   "strip": null,
+   "vendor": "nvidia"
   },
   {
    "id": "python:yue2",
@@ -553,7 +554,8 @@
    "size": 21980728,
    "sha256": "7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14",
    "dest": "runtime/yue2",
-   "strip": "python"
+   "strip": "python",
+   "vendor": "nvidia"
   },
   {
    "id": "python:sheetsage",
@@ -563,7 +565,8 @@
    "size": 25189257,
    "sha256": "06cbe479e039f5b9cb5640c286d790074d63f549f92a32d599a3748293bd4510",
    "dest": "runtime/sheetsage",
-   "strip": "python"
+   "strip": "python",
+   "vendor": "nvidia"
   },
   {
    "id": "tool:ffmpeg",
@@ -573,7 +576,8 @@
    "size": 61137843,
    "sha256": "50032b867c3ce74d682d2e9321e9d2a4b8bed37a09cba41b3980015658ffd498",
    "dest": "runtime/ffmpeg",
-   "strip": "ffmpeg-6.1.1-full_build-shared"
+   "strip": "ffmpeg-6.1.1-full_build-shared",
+   "vendor": "nvidia"
   },
   {
    "id": "env:yue2",
@@ -781,7 +785,8 @@
      "size": 77582,
      "sha256": "129a015327a2eca530760ffd2163ccb8cb65f7e601715de1d9626a40c568e2e2"
     }
-   ]
+   ],
+   "vendor": "nvidia"
   },
   {
    "id": "env:sheetsage",
@@ -1008,7 +1013,68 @@
      "size": 131087,
      "sha256": "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"
     }
-   ]
+   ],
+   "vendor": "nvidia"
+  },
+  {
+   "id": "archive:therock-runtime",
+   "kind": "archive",
+   "component": "song",
+   "vendor": "amd",
+   "dest": "runtime/rocm",
+   "size": 524288000,
+   "url": "https://github.com/ROCm/TheRock/releases/download/v7.13.0rc1/therock-runtime-windows.zip",
+   "sha256": "PLACEHOLDER",
+   "strip": "therock-runtime",
+   "detail": "AMD TheRock v4 HIP libraries (librocdxg, amdhip64, etc.)"
+  },
+  {
+   "id": "wheels:rocm-yue2",
+   "kind": "wheels",
+   "component": "song",
+   "vendor": "amd",
+   "python": "runtime/yue2/python.exe",
+   "wheels": [
+    {
+     "name": "torch",
+     "version": "2.11.0+rocm7.13.0a20260416",
+     "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torch-2.11.0%2Brocm7.13.0a20260416-cp312-cp312-win_amd64.whl",
+     "size": 2800000000,
+     "sha256": "PLACEHOLDER"
+    },
+    {
+     "name": "torchaudio",
+     "version": "2.11.0+rocm7.13.0a20260416",
+     "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torchaudio-2.11.0%2Brocm7.13.0a20260416-cp312-cp312-win_amd64.whl",
+     "size": 50000000,
+     "sha256": "PLACEHOLDER"
+    }
+   ],
+   "size": 2850000000
+  },
+  {
+   "id": "wheels:rocm-sheetsage",
+   "kind": "wheels",
+   "component": "cover",
+   "vendor": "amd",
+   "python": "runtime/sheetsage/python.exe",
+   "wheels": [
+    {
+     "name": "torch",
+     "version": "2.11.0+rocm7.13.0a20260416",
+     "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torch-2.11.0%2Brocm7.13.0a20260416-cp311-cp311-win_amd64.whl",
+     "size": 2800000000,
+     "sha256": "PLACEHOLDER"
+    },
+    {
+     "name": "torchaudio",
+     "version": "2.11.0+rocm7.13.0a20260416",
+     "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torchaudio-2.11.0%2Brocm7.13.0a20260416-cp311-cp311-win_amd64.whl",
+     "size": 50000000,
+     "sha256": "PLACEHOLDER"
+    }
+   ],
+   "size": 2850000000
   }
  ]
 }
