@@ -246,6 +246,15 @@ class Installer:
         if not python.is_file():
             raise InstallError(t("The Python runtime for {name} is missing - run Setup again.",
                                  name=item.id))
+        # Empty wheels list is a no-op marker. Used by ROCm fork to
+        # keep the archive:therock-runtime entry visible in the catalog
+        # without forcing a download that AMD does not publish a Windows
+        # tarball for. The marker file at runtime/rocm/.installed is
+        # what tells subsequent Setup runs to skip the step.
+        if not item.data["wheels"]:
+            self.path("runtime/rocm/.installed").touch()
+            self._log(f"{item.id} is a marker, no wheels to install")
+            return
         self.on_step(t("Installing {n} libraries…", n=len(paths)))
         wheels = [str(p) for p, w in zip(paths, item.data["wheels"]) if not w.get("build")]
         sources = [str(p) for p, w in zip(paths, item.data["wheels"]) if w.get("build")]

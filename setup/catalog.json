@@ -1459,13 +1459,12 @@
   },
   {
    "id": "archive:therock-runtime",
-   "kind": "archive",
+   "kind": "wheels",
    "component": "song",
    "vendor": "amd",
-   "dest": "runtime/rocm/.installed",
-   "size": 2134,
-   "url": "https://huggingface.co/m-a-p/YuE2-3B/resolve/29b3558dd46954a0cd9021dc76d5c91864a0f1c7/.gitattributes",
-   "sha256": "",
+   "python": "runtime/uv/uv.exe",
+   "wheels": [],
+   "size": 0,
    "detail": "AMD ROCm runtime (librocdxg, hipblas, rocblas) - manual install: see docs/BUILD_AMD.md"
   }
  ]
