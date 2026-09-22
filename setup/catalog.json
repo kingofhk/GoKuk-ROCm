@@ -1219,13 +1219,13 @@
      "name": "torch",
      "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torch-2.10.0%2Brocm7.12.0a20260311-cp312-cp312-win_amd64.whl",
      "size": 267616266,
-     "sha256": "33c935f090dd0705c3992a62ff07e7e5"
+     "sha256": "1fb488c6ab4e3496969b954c3591ac7782a21ed837af759d0bb816b8a84bff87"
     },
     {
      "name": "torchaudio",
      "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torchaudio-2.10.0%2Brocm7.12.0a20260311-cp312-cp312-win_amd64.whl",
      "size": 402431,
-     "sha256": "ef405fbed12f466c6d02fdb9e9350006"
+     "sha256": "b495049166840a50468ee95d210d34e9d05e1e6081898614488d9cfede1a009f"
     }
    ],
    "size": 314548374
@@ -1446,13 +1446,13 @@
      "name": "torch",
      "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torch-2.10.0%2Brocm7.12.0a20260311-cp311-cp311-win_amd64.whl",
      "size": 267584704,
-     "sha256": "f1ffaa82200c5828f9b90f9f7ed8e385"
+     "sha256": "078864ef744a630fea85e993e9defc8cdff697c6c65ea04558bb8bea469b33ed"
     },
     {
      "name": "torchaudio",
      "url": "https://rocm.nightlies.amd.com/v2/gfx120X-all/torchaudio-2.10.0%2Brocm7.12.0a20260311-cp311-cp311-win_amd64.whl",
      "size": 401042,
-     "sha256": "e1685a3032ed4f1c8dd77514abd8a3a8"
+     "sha256": "b7ac9af517d4712965ba28e3e8cebbe289ec3ef11ecce222a439e9bf8804b57e"
     }
    ],
    "size": 365161835
