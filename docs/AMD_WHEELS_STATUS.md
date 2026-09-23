@@ -154,3 +154,63 @@ When AMD publishes the `rocm_sdk` Python wheel for Windows:
 
 Until either of those happens, the current fork state is the best
 this project can do.
+
+## ROCm 10.0 wheel architecture (per kpack discovery, Sep 2026)
+
+A user-found wheel at `D:\amd_torch_device_gfx1201-2.10.0+rocm7.15.0a20260627-cp312-cp312-win_amd64.whl` exposed AMD's new multi-arch packaging model. Inspection:
+
+* Wheel is **only a HIP kernel pack** (`.kpack` file format, magic `KPAK`).
+* Wheel size: 48.2 MB (vs ~250 MB for old single-wheel `torch`).
+* Contents: `torch/.kpack/torch_gfx1201.kpack` + METADATA + RECORD. No `__init__.py`, no `lib/*.dll`, no `_rocm_init.py`.
+* `Requires-Dist` in METADATA:
+  - `torch == 2.10.0+rocm7.15.0a20260627`
+  - `rocm-sdk-device-gfx1201 == 7.15.0a20260627`
+
+This means ROCm 10.0 PyTorch on Windows uses a **3-wheel split**:
+
+| Wheel | Role | Approx size |
+|---|---|---|
+| `amd-torch-device-gfx1201-*` | HIP kernels (kpack) | ~48 MB |
+| `torch-2.10.0+rocm7.15.0a20260627-*` | Python module + c10.dll + torch_cpu.dll | ~50-80 MB |
+| `rocm-sdk-device-gfx1201-7.15.0a20260627-*` | rocm_sdk Python + runtime DLLs | ~100 MB |
+
+**Why this matters for the fork**: the kpack alone is useless. Installing it requires the matching `torch` wheel (with `_rocm_init.py` and `lib/*.dll`) **and** the `rocm_sdk` Python package. The kpack only contributes precompiled HIP kernels that those wheels dispatch to.
+
+The fork's Phase 6 shim bypasses `import rocm_sdk`. **With the new model**, AMD ships `rocm_sdk` as a separate wheel, so the shim is unnecessary — but the install pipeline still needs to fetch three wheels in lockstep with matched version strings.
+
+### URLs the kpack exposed
+
+The user found the kpack via a direct download. Probing the same domain for the matching torch + rocm-sdk wheels:
+
+```
+https://rocm.nightlies.amd.com/whl-multi-arch/torch/torch-2.10.0%2Brocm7.15.0a20260627-cp312-cp312-win_amd64.whl
+    -> 404 NoSuchKey
+
+https://repo.amd.com/rocm/whl-multi-arch/rocm-sdk-device-gfx1201/rocm_sdk_device_gfx1201-7.15.0a20260627-cp312-cp312-win_amd64.whl
+    -> 403 AccessDenied (the index lists this dir but the dir listing is empty)
+
+https://repo.amd.com/rocm/whl-multi-arch/rocm-sdk-core/rocm_sdk_core-7.15.0a20260627-cp312-cp312-win_amd64.whl
+    -> 403 AccessDenied
+
+https://repo.amd.com/rocm/whl-multi-arch/torchaudio/torchaudio-2.10.0%2Brocm7.15.0a20260627-cp312-cp312-win_amd64.whl
+    -> 404 (only rocm7.13.0 torchaudio exists at this index, not 7.15)
+```
+
+The kpack was published; the matching `torch`, `rocm-sdk-core`, `rocm-sdk-device-gfx1201`, and `torchaudio-7.15` wheels were either never published, were unpublished, or were synced to a different path. This is consistent with the ROCm 10.0 release being a **partial Windows release** where not all 3 wheels of the split arrived in public mirrors.
+
+### What we know now
+
+1. **AMD's TheRock pipeline now ships per-GPU-arch wheel packages** as the public API. Single `torch-*-win_amd64.whl` with everything bundled is going away.
+2. **The split happens between three S3 paths**. Each can be 200 / 404 / 403 independently.
+3. **The split is fragile on Windows**: AMD only ships one of the three wheels to public mirrors for some build strings. Without the `rocm_sdk_core` wheel, even the kpack + torch wheel pair will not load — `import rocm_sdk` fails just like before.
+4. **The fork's Phase 6 shim** is still the right workaround for the `import rocm_sdk` failure, even on this newer model. It does not depend on the wheel structure.
+
+### What this changes for the fork
+
+Nothing immediate. The current catalog wheels (March 2026 build, single-wheel format) still work on the user's machine because they are cached. The kpack discovery is interesting because it explains **why** AMD has not published a complete `rocm_sdk` Python wheel for Windows — they are restructuring the entire delivery model around TheRock.
+
+For the fork to land end-to-end Windows song generation, the question is now:
+
+> When does AMD publish **all three wheels** of a single build string on Windows?
+
+Until then, the user's cached March 2026 build remains the only working AMD ROCm Windows PyTorch stack we have access to, and the fork's Phase 6 shim remains the correct workaround.
