@@ -214,3 +214,40 @@ For the fork to land end-to-end Windows song generation, the question is now:
 > When does AMD publish **all three wheels** of a single build string on Windows?
 
 Until then, the user's cached March 2026 build remains the only working AMD ROCm Windows PyTorch stack we have access to, and the fork's Phase 6 shim remains the correct workaround.
+
+## The "phantom index" (Sep 23 11:32 UTC)
+
+Probing the user's URL pattern one more time after the kpack discovery revealed:
+
+```
+https://rocm.nightlies.amd.com/whl-multi-arch/rocm-sdk-core/rocm_sdk_core-10.1.0a20260810-py3-none-win_amd64.whl
+  index: lists the file
+  HEAD : 404 NoSuchKey
+
+https://rocm.nightlies.amd.com/whl-multi-arch/rocm-sdk-core/rocm_sdk_core-10.1.0a20260810-py3-none-linux_x86_64.whl
+  index: lists the file
+  HEAD : 404 NoSuchKey
+
+https://rocm.nightlies.amd.com/whl-multi-arch/rocm-sdk-core/rocm_sdk_core-10.0.0a20260729-py3-none-win_amd64.whl
+  index: lists the file
+  HEAD : 404 NoSuchKey
+
+https://repo.amd.com/rocm/whl-multi-arch/rocm-sdk-core/rocm_sdk_core-10.1.0a20260810-py3-none-win_amd64.whl
+  HEAD : 403 AccessDenied (separate problem; whole mirror blocked)
+```
+
+**Even Linux wheels 404**. The index lists every wheel in every category (torch, torchaudio, rocm-sdk-core, rocm-sdk-device-*, rocm-sdk-libraries, rocm, rocm-bootstrap, ...). All return 404 on HEAD.
+
+The kpack the user has (`amd_torch_device_gfx1201-2.10.0+rocm7.15.0a20260627-cp312-cp312-win_amd64.whl`) is therefore a **survivor** from a brief window when AMD's S3 sync was working. Today (Sep 23) that URL also returns 404 from CDN. The file exists only because the user downloaded it earlier.
+
+**This is an AMD infrastructure problem, not a fork problem.** The fork's catalog URLs and discovery logic are correct; AMD's CDN just isn't serving the objects that their index claims exist.
+
+### What would unblock the fork
+
+1. AMD restores the S3 sync — the index is already ahead of reality
+2. The user's local kpack is correct; it just needs the matching torch + rocm_sdk_core wheels to land in S3
+3. After that, our Phase 6 shim can be tested against a real `import rocm_sdk` success
+
+### What we know about the AMD TheRock release model
+
+Phoronix coverage (Sep 2026) said *"Windows will follow the same release cadence as Linux for ROCm releases. Right now the ROCm Core SDK for Windows is a simple static package while later in the year they are working toward native Windows installer support."* The multi-arch index at `whl-multi-arch/amd-torch-device-gfx*/` is the public mirror of that future shape. Until the SDK lands, the fork cannot progress.
