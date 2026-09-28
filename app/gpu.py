@@ -132,10 +132,10 @@ def _amd_vram_from_registry() -> int | None:
 
     py_code = (
         "import sys, os; "
-        "rocm_bin = r'C:\\Program Files\\AMD\\ROCm\\7.2\\bin'; "
+        r"rocm_bin = r'C:\Program Files\AMD\ROCm\7.2\bin'; "
         "if hasattr(os, 'add_dll_directory'): "
         "  os.add_dll_directory(rocm_bin); "
-        "os.environ.setdefault('ROCM_HOME', r'C:\\Program Files\\AMD\\ROCm\\7.2'); "
+        r"os.environ.setdefault('ROCM_HOME', r'C:\Program Files\AMD\ROCm\7.2'); "
         "import torch; "
         "print(int(torch.cuda.get_device_properties(0).total_memory))"
     )
