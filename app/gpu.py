@@ -95,6 +95,71 @@ def _amd_total_memory_from_xrt(out: str) -> int:
     return 0
 
 
+def _amd_vram_from_registry() -> int | None:
+    """Read the AMD driver's authoritative VRAM value.
+
+    Best source on Windows: ``torch.cuda.get_device_properties(0).total_memory``
+    when torch is importable and CUDA/ROCm is initialized. This returns
+    the *real* dedicated VRAM in bytes (WMI's AdapterRAM is unreliable
+    on discrete GPUs and reports ~4 GB instead of 16 GB on the RX 9070 XT).
+
+    Falls back to the AMD driver's registry value at
+    ``HKLM\\System\\CurrentControlSet\\Control\\Class\\
+        {4d36e968-e325-11ce-bfc1-08002be10318}\\####\\
+        HardwareInformation.AdapterRAM``.
+    On a clean install that registry value is sometimes missing
+    (Adrenalin 26.x does not write it for newer cards), so this
+    fallback may return ``None``.
+
+    Returns VRAM in **MiB**, or ``None`` if neither source worked.
+    """
+    # Tier 1: torch (most authoritative when available)
+    try:
+        import torch  # type: ignore
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            props = torch.cuda.get_device_properties(0)
+            total = getattr(props, "total_memory", 0)
+            if total > 0:
+                return total // (1024 * 1024)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    if os.name != "nt":
+        return None
+
+    # Tier 2: registry (may be empty on newer Adrenalin installs)
+    base = r"HKLM\System\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    ps_cmd = (
+        "$max = 0; "
+        "for ($i = 0; $i -lt 8; $i++) { "
+        "$idx = '{0:D4}' -f $i; "
+        f"$path = '{base}\\' + $idx; "
+        "$v = (Get-ItemProperty -Path $path -Name "
+        "  'HardwareInformation.AdapterRAM' -ErrorAction SilentlyContinue)"
+        "  .'HardwareInformation.AdapterRAM'; "
+        "if ($v -and $v -gt $max) { $max = $v } "
+        "}; "
+        "if ($max -ge 1GB) { $max } else { 0 }"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not out or out == "0":
+        return None
+    try:
+        bytes_val = int(out)
+    except ValueError:
+        return None
+    return bytes_val // (1024 * 1024)
+
+
 def _detect_amd() -> GPU | None:
     """The largest AMD card readable by ``rocminfo``, or None on failure.
 
@@ -154,6 +219,10 @@ def _detect_amd() -> GPU | None:
             pass
 
     # Tier 3: WMI. Always available on Windows; cheap subprocess call.
+    # Returns a tentative card; the registry cross-check below corrects
+    # the WMI AdapterRAM misreport (Windows reports ~4 GB shared memory
+    # instead of the real 16 GB dedicated pool for discrete GPUs).
+    wmi_card: GPU | None = None
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
@@ -177,19 +246,24 @@ def _detect_amd() -> GPU | None:
             name, ram_str, _compat = parts
             if not name or "Radeon" not in name and "AMD" not in name:
                 continue
-            # WMI AdapterRAM is reported in bytes for the dedicated pool,
-            # but Windows lies - often returns system shared memory (~4 GB).
-            # Treat any AMD positive integer as valid; the verdict does not
-            # need precise VRAM to decide "ok" vs "warn".
             try:
                 ram = int(ram_str)
             except ValueError:
                 ram = 0
             if name and ram > 0:
-                return GPU(name=name, vram_mib=ram // (1024 * 1024),
-                           driver="0.0", is_amd=True)
+                wmi_card = GPU(name=name, vram_mib=ram // (1024 * 1024),
+                               driver="0.0", is_amd=True)
     except (OSError, subprocess.SubprocessError):
         pass
+    if wmi_card is not None:
+        # Cross-check via the AMD driver registry value. WMI
+        # Win32_VideoController.AdapterRAM is shared-memory garbage on
+        # discrete GPUs; the AMD driver writes the *real* dedicated VRAM
+        # to HKLM\...\Class\{4d36e968-...}\####\HardwareInformation.AdapterRAM.
+        real_mib = _amd_vram_from_registry()
+        if real_mib is not None:
+            wmi_card.vram_mib = real_mib
+        return wmi_card
 
     # Tier 4: AMD driver DLL presence as a final hint. The Adrenalin driver
     # ships amdhip64_7.dll to C:\Windows\System32. If that file is there,
