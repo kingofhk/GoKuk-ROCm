@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import textwrap
 from dataclasses import dataclass
 
 from app.i18n import t
@@ -130,21 +131,28 @@ def _amd_vram_from_registry() -> int | None:
     if not yue2_py.is_file():
         return None
 
-    py_code = (
-        "import sys, os; "
-        r"rocm_bin = r'C:\Program Files\AMD\ROCm\7.2\bin'; "
-        "if hasattr(os, 'add_dll_directory'): "
-        "  os.add_dll_directory(rocm_bin); "
-        r"os.environ.setdefault('ROCM_HOME', r'C:\Program Files\AMD\ROCm\7.2'); "
-        "import torch; "
-        "print(int(torch.cuda.get_device_properties(0).total_memory))"
-    )
+    # The script we ship to the subprocess. We send it via stdin
+    # (with `-` as the program argument) so Windows command-line
+    # escaping does not corrupt the embedded Windows paths with
+    # backslashes. subprocess.Popen inherits the parent env, so
+    # ROCM_HOME / HIP_PATH from the GUI shell still applies.
+    py_code = textwrap.dedent(
+        """
+        import sys, os
+        rocm_bin = r'C:\\Program Files\\AMD\\ROCm\\7.2\\bin'
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(rocm_bin)
+        os.environ.setdefault('ROCM_HOME', r'C:\\Program Files\\AMD\\ROCm\\7.2')
+        import torch
+        print(int(torch.cuda.get_device_properties(0).total_memory))
+        """
+    ).strip()
     try:
         proc = subprocess.run(
-            [str(yue2_py), "-c", py_code],
+            [str(yue2_py), "-"],
+            input=py_code,
             capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            # Inherit env so ROCM_HOME / HIP_PATH from caller still applies.
         )
     except (OSError, subprocess.SubprocessError):
         return None
