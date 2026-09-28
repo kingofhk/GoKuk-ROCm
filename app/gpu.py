@@ -103,89 +103,61 @@ def _amd_vram_from_registry() -> int | None:
     the *real* dedicated VRAM in bytes (WMI's AdapterRAM is unreliable
     on discrete GPUs and reports ~4 GB instead of 16 GB on the RX 9070 XT).
 
-    Falls back to the AMD driver's registry value at
-    ``HKLM\\System\\CurrentControlSet\\Control\\Class\\
-        {4d36e968-e325-11ce-bfc1-08002be10318}\\####\\
-        HardwareInformation.AdapterRAM``.
-    On a clean install that registry value is sometimes missing
-    (Adrenalin 26.x does not write it for newer cards), so this
-    fallback may return ``None``.
-
     Implementation note: torch's ``_load_dll_libraries`` step needs the
-    HIP runtime DLLs on the PATH. The GUI runtime directory
-    (``runtime\\gui\\``) does not have torch, and even in the
-    ``runtime\\yue2\\`` runtime the DLL search path must already be
-    configured (ROCM_HOME set, add_dll_directory called). We therefore
-    run torch inside a subprocess where the env is set explicitly;
-    this avoids the caller-side DLL loading failure and makes the
-    query safe to call from any Python on the box.
+    HIP runtime DLLs on the PATH (``amd_comgr``, ``amdhip64_7``,
+    ``hipblaslt``, ``MIOpen``). The GUI runtime directory
+    (``runtime\\gui\\``) does not have torch at all, and even in
+    ``runtime\\yue2\\`` the DLL search path must already be configured
+    (ROCM_HOME set, add_dll_directory called). We therefore run torch
+    inside a subprocess with explicit env, calling the yue2 Python
+    directly via the existing ``app.paths.yue2_python`` helper. This
+    makes the query safe to call from any Python on the box.
 
-    Returns VRAM in **MiB**, or ``None`` if neither source worked.
+    Returns VRAM in **MiB**, or ``None`` if torch was unreachable.
+
+    Falls back to ``None`` on Linux and non-Windows systems; callers
+    should not invoke this from a Linux GUI.
     """
-    # Tier 1: torch via subprocess (with explicit ROCm env). This works
-    # regardless of which runtime is calling us (gui venv, yue2 venv,
-    # ad-hoc Python).
-    try:
-        ps_script = (
-            "$env:ROCM_HOME = 'C:\\Program Files\\AMD\\ROCm\\7.2'; "
-            "$env:PATH = 'C:\\Program Files\\AMD\\ROCm\\7.2\\bin;' + $env:PATH; "
-            "$out = & python -c \""
-            "import sys; "
-            "if hasattr(__import__('os'), 'add_dll_directory'): "
-            "__import__('os').add_dll_directory(r'C:\\Program Files\\AMD\\ROCm\\7.2\\bin'); "
-            "import torch; "
-            "print(int(torch.cuda.get_device_properties(0).total_memory))\""
-            " 2>&1 | Select-Object -Last 1; "
-            "Write-Host $out"
-        )
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps_script],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        ).stdout.strip()
-        # Extract last integer-looking token from output
-        for token in reversed(out.split()):
-            try:
-                value = int(token)
-                if value > 1_000_000_000:  # must be at least 1 GB
-                    return value // (1024 * 1024)
-            except ValueError:
-                continue
-    except (OSError, subprocess.SubprocessError):
-        pass
-
     if os.name != "nt":
         return None
+    try:
+        # Local import to avoid a hard dependency on app.paths at module
+        # import time (some test fixtures load gpu.py without runtime/).
+        from app import paths
+        yue2_py = paths.yue2_python()
+    except Exception:
+        return None
+    if not yue2_py.is_file():
+        return None
 
-    # Tier 2: registry (may be empty on newer Adrenalin installs)
-    base = r"HKLM\System\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
-    ps_cmd = (
-        "$max = 0; "
-        "for ($i = 0; $i -lt 8; $i++) { "
-        "$idx = '{0:D4}' -f $i; "
-        f"$path = '{base}\\' + $idx; "
-        "$v = (Get-ItemProperty -Path $path -Name "
-        "  'HardwareInformation.AdapterRAM' -ErrorAction SilentlyContinue)"
-        "  .'HardwareInformation.AdapterRAM'; "
-        "if ($v -and $v -gt $max) { $max = $v } "
-        "}; "
-        "if ($max -ge 1GB) { $max } else { 0 }"
+    py_code = (
+        "import sys, os; "
+        "rocm_bin = r'C:\\Program Files\\AMD\\ROCm\\7.2\\bin'; "
+        "if hasattr(os, 'add_dll_directory'): "
+        "  os.add_dll_directory(rocm_bin); "
+        "os.environ.setdefault('ROCM_HOME', r'C:\\Program Files\\AMD\\ROCm\\7.2'); "
+        "import torch; "
+        "print(int(torch.cuda.get_device_properties(0).total_memory))"
     )
     try:
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=15,
+        proc = subprocess.run(
+            [str(yue2_py), "-c", py_code],
+            capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        ).stdout.strip()
+            # Inherit env so ROCM_HOME / HIP_PATH from caller still applies.
+        )
     except (OSError, subprocess.SubprocessError):
         return None
-    if not out or out == "0":
-        return None
-    try:
-        bytes_val = int(out)
-    except ValueError:
-        return None
-    return bytes_val // (1024 * 1024)
+    out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+    for token in reversed(out.split()):
+        try:
+            value = int(token.strip(","))
+        except ValueError:
+            continue
+        # Must be at least 1 GiB (1_073_741_824 bytes) to be plausible.
+        if value >= 1_073_741_824:
+            return value // (1024 * 1024)
+    return None
 
 
 def _detect_amd() -> GPU | None:
