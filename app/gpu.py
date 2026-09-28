@@ -111,19 +111,47 @@ def _amd_vram_from_registry() -> int | None:
     (Adrenalin 26.x does not write it for newer cards), so this
     fallback may return ``None``.
 
+    Implementation note: torch's ``_load_dll_libraries`` step needs the
+    HIP runtime DLLs on the PATH. The GUI runtime directory
+    (``runtime\\gui\\``) does not have torch, and even in the
+    ``runtime\\yue2\\`` runtime the DLL search path must already be
+    configured (ROCM_HOME set, add_dll_directory called). We therefore
+    run torch inside a subprocess where the env is set explicitly;
+    this avoids the caller-side DLL loading failure and makes the
+    query safe to call from any Python on the box.
+
     Returns VRAM in **MiB**, or ``None`` if neither source worked.
     """
-    # Tier 1: torch (most authoritative when available)
+    # Tier 1: torch via subprocess (with explicit ROCm env). This works
+    # regardless of which runtime is calling us (gui venv, yue2 venv,
+    # ad-hoc Python).
     try:
-        import torch  # type: ignore
-        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-            props = torch.cuda.get_device_properties(0)
-            total = getattr(props, "total_memory", 0)
-            if total > 0:
-                return total // (1024 * 1024)
-    except ImportError:
-        pass
-    except Exception:
+        ps_script = (
+            "$env:ROCM_HOME = 'C:\\Program Files\\AMD\\ROCm\\7.2'; "
+            "$env:PATH = 'C:\\Program Files\\AMD\\ROCm\\7.2\\bin;' + $env:PATH; "
+            "$out = & python -c \""
+            "import sys; "
+            "if hasattr(__import__('os'), 'add_dll_directory'): "
+            "__import__('os').add_dll_directory(r'C:\\Program Files\\AMD\\ROCm\\7.2\\bin'); "
+            "import torch; "
+            "print(int(torch.cuda.get_device_properties(0).total_memory))\""
+            " 2>&1 | Select-Object -Last 1; "
+            "Write-Host $out"
+        )
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip()
+        # Extract last integer-looking token from output
+        for token in reversed(out.split()):
+            try:
+                value = int(token)
+                if value > 1_000_000_000:  # must be at least 1 GB
+                    return value // (1024 * 1024)
+            except ValueError:
+                continue
+    except (OSError, subprocess.SubprocessError):
         pass
 
     if os.name != "nt":
